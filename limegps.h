@@ -6,6 +6,7 @@
 #include <lime/LimeSuite.h> // at C:\Program Files\PothosSDR\include
 #include <string.h>
 #include <time.h>
+#include <curses.h>
 #ifdef WIN32
 // To avoid conflict between time.h and pthread.h on Windows
 #define HAVE_STRUCT_TIMESPEC
@@ -43,8 +44,16 @@
 #define DEL_VEL 0.4
 #define DEL_TURN 4.5 // 45 deg/s
 
+#define SCRATCHPAD_SIZE 4096
+
+
 // Activate gamepad support
 //#define USE_GAMEPAD
+
+typedef struct
+{
+	WINDOW* scr;
+} meta_t;
 
 typedef struct {
 	char navfile[MAX_CHAR];
@@ -55,7 +64,7 @@ typedef struct {
 	int verb;
 	gpstime_t g0;
 	double llh[3];
-	int interactive;
+	enum InteractiveMode interactive;
 	int timeoverwrite;
 	int iono_enable;
 } option_t;
@@ -78,6 +87,15 @@ typedef struct {
 	pthread_cond_t initialization_done;
 } gps_t;
 
+typedef struct
+{
+	unsigned int gain;
+	unsigned int min_gain;
+	unsigned int max_gain;
+	lms_device_t* device;
+	int32_t channel;
+} device_t;
+
 typedef struct {
 	option_t opt;
 
@@ -94,6 +112,9 @@ typedef struct {
 	pthread_cond_t fifo_write_ready;
 
 	double time;
+
+	device_t device;
+	meta_t meta;
 } sim_t;
 
 extern void *gps_task(void *arg);

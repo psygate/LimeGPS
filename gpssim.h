@@ -8,6 +8,15 @@
 #define FALSE	(0)
 #endif
 
+enum InteractiveMode
+{
+	OFF = 0,
+	ABSOLUTE = 1,
+	RELATIVE = 2
+};
+
+
+
 /*! \brief Maximum length of a line in a text file (RINEX, motion) */
 #define MAX_CHAR (100)
 
@@ -56,8 +65,8 @@
 #define OMEGA_EARTH 7.2921151467e-5
 #define PI 3.1415926535898
 
-#define WGS84_RADIUS	6378137.0
-#define WGS84_ECCENTRICITY 0.0818191908426
+#define WGS84_RADIUS		6378137.0
+#define WGS84_ECCENTRICITY	0.0818191908426
 
 #define R2D 57.2957795131
 
@@ -172,6 +181,7 @@ typedef struct
 	double azel[2];
 	range_t rho0;
 } channel_t;
+
 
 void date2gps(const datetime_t *t, gpstime_t *g);
 

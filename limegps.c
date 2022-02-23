@@ -1,17 +1,13 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include "limegps.h"
+#include "gpssim.h"
+
 #include <math.h>
+#include <getopt.h>
+#include <curses.h>
 
-// for _getch used in Windows runtime.
-#ifdef WIN32
-#include <conio.h>
-#include "getopt.h"
-#else
-#include <unistd.h>
-#endif
-
-void init_sim(sim_t *s)
+void init_sim(sim_t* s)
 {
 	pthread_mutex_init(&(s->tx.lock), NULL);
 	//s->tx.error = 0;
@@ -32,22 +28,21 @@ void init_sim(sim_t *s)
 	s->time = 0.0;
 }
 
-size_t get_sample_length(sim_t *s)
+size_t get_sample_length(sim_t* s)
 {
 	long length;
 
 	length = s->head - s->tail;
-	if (length < 0)
-		length += FIFO_LENGTH;
+	if (length < 0) length += FIFO_LENGTH;
 
 	return((size_t)length);
 }
 
-size_t fifo_read(int16_t *buffer, size_t samples, sim_t *s)
+size_t fifo_read(int16_t* buffer, size_t samples, sim_t* s)
 {
 	size_t length;
 	size_t samples_remaining;
-	int16_t *buffer_current = buffer;
+	int16_t* buffer_current = buffer;
 
 	length = get_sample_length(s);
 
@@ -73,12 +68,12 @@ size_t fifo_read(int16_t *buffer, size_t samples, sim_t *s)
 	return(length);
 }
 
-bool is_finished_generation(sim_t *s)
+bool is_finished_generation(sim_t* s)
 {
 	return s->finished;
 }
 
-int is_fifo_write_ready(sim_t *s)
+int is_fifo_write_ready(sim_t* s)
 {
 	int status = 0;
 
@@ -89,23 +84,23 @@ int is_fifo_write_ready(sim_t *s)
 	return(status);
 }
 
-void *tx_task(void *arg)
+void* tx_task(void* arg)
 {
-	sim_t *s = (sim_t *)arg;
+	sim_t* s = (sim_t*)arg;
 	size_t samples_populated;
 
 	while (1) {
-		int16_t *tx_buffer_current = s->tx.buffer;
+		int16_t* tx_buffer_current = s->tx.buffer;
 		unsigned int buffer_samples_remaining = SAMPLES_PER_BUFFER;
 
 		while (buffer_samples_remaining > 0) {
-			
+
 			pthread_mutex_lock(&(s->gps.lock));
 			while (get_sample_length(s) == 0)
 			{
 				pthread_cond_wait(&(s->fifo_read_ready), &(s->gps.lock));
 			}
-//			assert(get_sample_length(s) > 0);
+			//			assert(get_sample_length(s) > 0);
 
 			samples_populated = fifo_read(tx_buffer_current,
 				buffer_samples_remaining,
@@ -113,19 +108,7 @@ void *tx_task(void *arg)
 			pthread_mutex_unlock(&(s->gps.lock));
 
 			pthread_cond_signal(&(s->fifo_write_ready));
-#if 0
-			if (is_fifo_write_ready(s)) {
-				/*
-				printf("\rTime = %4.1f", s->time);
-				s->time += 0.1;
-				fflush(stdout);
-				*/
-			}
-			else if (is_finished_generation(s))
-			{
-				goto out;
-			}
-#endif
+
 			// Advance the buffer pointer.
 			buffer_samples_remaining -= (unsigned int)samples_populated;
 			tx_buffer_current += (2 * samples_populated);
@@ -150,7 +133,7 @@ out:
 	return NULL;
 }
 
-int start_tx_task(sim_t *s)
+int start_tx_task(sim_t* s)
 {
 	int status;
 
@@ -159,7 +142,7 @@ int start_tx_task(sim_t *s)
 	return(status);
 }
 
-int start_gps_task(sim_t *s)
+int start_gps_task(sim_t* s)
 {
 	int status;
 
@@ -168,7 +151,7 @@ int start_gps_task(sim_t *s)
 	return(status);
 }
 
-void usage(char *progname)
+void usage(char* progname)
 {
 	printf("Usage: %s [options]\n"
 		"Options:\n"
@@ -180,8 +163,10 @@ void usage(char *progname)
 		"  -T <date,time>   Overwrite TOC and TOE to scenario start time\n"
 		"  -d <duration>    Duration [sec] (max: %.0f)\n"
 		"  -a <rf_gain>     Normalized RF gain in [0.0 ... 1.0] (default: 0.1)\n"
+		"  -A <rf_gain>     Absolute gain in dbm.\n"
 #ifdef WIN32
 		"  -i               Interactive mode: North='%c', South='%c', East='%c', West='%c'\n"
+		"  -j               Relative interactive mode.\n"
 #ifdef USE_GAMEPAD
 		"                   (Xbox gamepad: Turn Left=<, Turn Right=>, Forward=B)\n"
 #endif
@@ -189,17 +174,26 @@ void usage(char *progname)
 		"  -I               Disable ionospheric delay for spacecraft scenario\n",
 		progname,
 #ifdef WIN32
-		((double)USER_MOTION_SIZE)/10.0, 
+		((double)USER_MOTION_SIZE) / 10.0,
 		NORTH_KEY, SOUTH_KEY, EAST_KEY, WEST_KEY);
 #else
-		((double)USER_MOTION_SIZE)/10.0);
+		((double)USER_MOTION_SIZE) / 10.0);
 #endif
 	return;
 }
 
-int main(int argc, char *argv[])
+static unsigned int scale_and_limit_gain(float gain)
 {
-	if (argc<3)
+	const unsigned int max_gain = 73;
+	const unsigned int min_gain = 0;
+
+	const value = min_gain + (max_gain - min_gain) * gain;
+	return max(min_gain, max(max_gain, value));
+}
+
+int main(int argc, char* argv[])
+{
+	if (argc < 3)
 	{
 		usage(argv[0]);
 		exit(1);
@@ -222,7 +216,7 @@ int main(int argc, char *argv[])
 	s.opt.llh[0] = 40.7850916 / R2D;
 	s.opt.llh[1] = -73.968285 / R2D;
 	s.opt.llh[2] = 10.0;
-	s.opt.interactive = FALSE;
+	s.opt.interactive = 0;
 	s.opt.timeoverwrite = FALSE;
 	s.opt.iono_enable = TRUE;
 
@@ -230,9 +224,12 @@ int main(int argc, char *argv[])
 	int result;
 	double duration;
 	datetime_t t0;
-	double gain = 0.1;
+	unsigned int min_gain = 0, max_gain = 73, gain = scale_and_limit_gain(0.1);
+	s.device.gain = gain;
+	s.device.min_gain = min_gain;
+	s.device.max_gain = max_gain;
 
-	while ((result=getopt(argc,argv,"e:u:g:l:T:t:d:a:iI"))!=-1)
+	while ((result = getopt(argc, argv, "e:u:g:l:T:t:d:A:a:jiI")) != -1)
 	{
 		switch (result)
 		{
@@ -254,22 +251,22 @@ int main(int argc, char *argv[])
 			// Added by scateu@gmail.com
 			s.opt.nmeaGGA = FALSE;
 			s.opt.staticLocationMode = TRUE;
-			sscanf(optarg,"%lf,%lf,%lf",&s.opt.llh[0],&s.opt.llh[1],&s.opt.llh[2]);
+			sscanf(optarg, "%lf,%lf,%lf", &s.opt.llh[0], &s.opt.llh[1], &s.opt.llh[2]);
 			s.opt.llh[0] /= R2D; // convert to RAD
 			s.opt.llh[1] /= R2D; // convert to RAD
 			break;
 		case 'T':
 			s.opt.timeoverwrite = TRUE;
-			if (strncmp(optarg, "now", 3)==0)
+			if (strncmp(optarg, "now", 3) == 0)
 			{
 				time_t timer;
-				struct tm *gmt;
-				
+				struct tm* gmt;
+
 				time(&timer);
 				gmt = gmtime(&timer);
 
-				t0.y = gmt->tm_year+1900;
-				t0.m = gmt->tm_mon+1;
+				t0.y = gmt->tm_year + 1900;
+				t0.m = gmt->tm_mon + 1;
 				t0.d = gmt->tm_mday;
 				t0.hh = gmt->tm_hour;
 				t0.mm = gmt->tm_min;
@@ -281,8 +278,8 @@ int main(int argc, char *argv[])
 			}
 		case 't':
 			sscanf(optarg, "%d/%d/%d,%d:%d:%lf", &t0.y, &t0.m, &t0.d, &t0.hh, &t0.mm, &t0.sec);
-			if (t0.y<=1980 || t0.m<1 || t0.m>12 || t0.d<1 || t0.d>31 ||
-				t0.hh<0 || t0.hh>23 || t0.mm<0 || t0.mm>59 || t0.sec<0.0 || t0.sec>=60.0)
+			if (t0.y <= 1980 || t0.m < 1 || t0.m>12 || t0.d < 1 || t0.d>31 ||
+				t0.hh < 0 || t0.hh>23 || t0.mm < 0 || t0.mm>59 || t0.sec < 0.0 || t0.sec >= 60.0)
 			{
 				printf("ERROR: Invalid date and time.\n");
 				exit(1);
@@ -292,22 +289,35 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			duration = atof(optarg);
-			if (duration<0.0 || duration>((double)USER_MOTION_SIZE)/10.0)
+			if (duration<0.0 || duration>((double)USER_MOTION_SIZE) / 10.0)
 			{
 				printf("ERROR: Invalid duration.\n");
 				exit(1);
 			}
-			s.opt.iduration = (int)(duration*10.0+0.5);
+			s.opt.iduration = (int)(duration * 10.0 + 0.5);
 			break;
 		case 'a':
-			gain = atof(optarg);
-			if (gain < 0.0)
-				gain = 0.0;
-			if (gain > 1.0)
-				gain = 1.0;
+			gain = scale_and_limit_gain(atof(optarg));
+
+			break;
+		case 'A':
+			gain = max(min_gain, min(max_gain, atoi(optarg)));
 			break;
 		case 'i':
-			s.opt.interactive = TRUE;
+			if (s.opt.interactive != OFF)
+			{
+				fprintf(stderr, "Interactive mode already specified.\n");
+				exit(1);
+			}
+			s.opt.interactive = ABSOLUTE;
+			break;
+		case 'j':
+			if (s.opt.interactive != OFF)
+			{
+				fprintf(stderr, "Interactive mode already specified.\n");
+				exit(1);
+			}
+			s.opt.interactive = RELATIVE;
 			break;
 		case 'I':
 			s.opt.iono_enable = FALSE; // Disable ionospheric correction
@@ -321,13 +331,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (s.opt.navfile[0]==0)
+
+
+	if (s.opt.navfile[0] == 0)
 	{
 		printf("ERROR: GPS ephemeris file is not specified.\n");
 		exit(1);
 	}
 
-	if (s.opt.umfile[0]==0 && !s.opt.staticLocationMode)
+	if (s.opt.umfile[0] == 0 && !s.opt.staticLocationMode)
 	{
 		printf("ERROR: User motion file / NMEA GGA stream is not specified.\n");
 		printf("You may use -l to specify the static location directly.\n");
@@ -348,25 +360,25 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
-	lms_info_str_t *device_list = malloc(sizeof(lms_info_str_t) * device_count);
+	lms_info_str_t* device_list = malloc(sizeof(lms_info_str_t) * device_count);
 	device_count = LMS_GetDeviceList(device_list);
 
 	// Initialize simulator
 	init_sim(&s);
 
 	// Allocate TX buffer to hold each block of samples to transmit.
-	s.tx.buffer = (int16_t *)malloc(SAMPLES_PER_BUFFER * sizeof(int16_t) * 2); // for 16-bit I and Q samples
-	
-	if (s.tx.buffer == NULL) 
+	s.tx.buffer = (int16_t*)malloc(SAMPLES_PER_BUFFER * sizeof(int16_t) * 2); // for 16-bit I and Q samples
+
+	if (s.tx.buffer == NULL)
 	{
 		printf("ERROR: Failed to allocate TX buffer.\n");
 		goto out;
 	}
 
 	// Allocate FIFOs to hold 0.1 seconds of I/Q samples each.
-	s.fifo = (int16_t *)malloc(FIFO_LENGTH * sizeof(int16_t) * 2); // for 16-bit I and Q samples
+	s.fifo = (int16_t*)malloc(FIFO_LENGTH * sizeof(int16_t) * 2); // for 16-bit I and Q samples
 
-	if (s.fifo == NULL) 
+	if (s.fifo == NULL)
 	{
 		printf("ERROR: Failed to allocate I/Q sample buffer.\n");
 		goto out;
@@ -375,7 +387,7 @@ int main(int argc, char *argv[])
 	// Initializing device
 	printf("Opening and initializing device...\n");
 
-	lms_device_t *device = NULL;
+	lms_device_t* device = NULL;
 
 	if (LMS_Open(&device, device_list[0], NULL))
 	{
@@ -383,7 +395,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	const lms_dev_info_t *devinfo =  LMS_GetDeviceInfo(device);
+	const lms_dev_info_t* devinfo = LMS_GetDeviceInfo(device);
 
 	if (devinfo == NULL)
 	{
@@ -391,24 +403,24 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-    printf("deviceName: %s\n", devinfo->deviceName);
-    printf("expansionName: %s\n", devinfo->expansionName);
-    printf("firmwareVersion: %s\n", devinfo->firmwareVersion);
-    printf("hardwareVersion: %s\n", devinfo->hardwareVersion);
-    printf("protocolVersion: %s\n", devinfo->protocolVersion);
-    printf("gatewareVersion: %s\n", devinfo->gatewareVersion);
-    printf("gatewareTargetBoard: %s\n", devinfo->gatewareTargetBoard);
+	printf("deviceName: %s\n", devinfo->deviceName);
+	printf("expansionName: %s\n", devinfo->expansionName);
+	printf("firmwareVersion: %s\n", devinfo->firmwareVersion);
+	printf("hardwareVersion: %s\n", devinfo->hardwareVersion);
+	printf("protocolVersion: %s\n", devinfo->protocolVersion);
+	printf("gatewareVersion: %s\n", devinfo->gatewareVersion);
+	printf("gatewareTargetBoard: %s\n", devinfo->gatewareTargetBoard);
 
-    int limeOversample = 1;
-    if(strncmp(devinfo->deviceName, "LimeSDR-USB", 11) == 0)
-    {
-        limeOversample = 0;    // LimeSDR-USB works best with default oversampling
-        printf("Found a LimeSDR-USB\n");
-    }
-    else
-    {
-        printf("Found a LimeSDR-Mini\n");
-    }
+	int limeOversample = 1;
+	if (strncmp(devinfo->deviceName, "LimeSDR-USB", 11) == 0)
+	{
+		limeOversample = 0;    // LimeSDR-USB works best with default oversampling
+		printf("Found a LimeSDR-USB\n");
+	}
+	else
+	{
+		printf("Found a LimeSDR-Mini\n");
+	}
 
 	int lmsReset = LMS_Reset(device);
 	if (lmsReset)
@@ -431,12 +443,12 @@ int main(int argc, char *argv[])
 	// Select antenna
 	//int32_t antenna = 1;
 	int antenna_count = LMS_GetAntennaList(device, LMS_CH_TX, channel, NULL);
-	lms_name_t *antenna_name = malloc(sizeof(lms_name_t) * antenna_count);
+	lms_name_t* antenna_name = malloc(sizeof(lms_name_t) * antenna_count);
 
 	if (antenna_count > 0)
 	{
 		int i = 0;
-		lms_range_t *antenna_bw = malloc(sizeof(lms_range_t) * antenna_count);
+		lms_range_t* antenna_bw = malloc(sizeof(lms_range_t) * antenna_count);
 		LMS_GetAntennaList(device, LMS_CH_TX, channel, antenna_name);
 		for (i = 0; i < antenna_count; i++)
 		{
@@ -444,8 +456,14 @@ int main(int argc, char *argv[])
 			//printf("Channel %d, antenna [%s] has BW [%lf .. %lf] (step %lf)" "\n", channel, antenna_name[i], antenna_bw[i].min, antenna_bw[i].max, antenna_bw[i].step);
 		}
 	}
+	
+	LMS_SetGaindB(device, LMS_CH_TX, channel, max_gain);
+	s.device.device = device;
+	s.device.channel = channel;
+	s.device.gain = gain;
+	s.device.min_gain = min_gain;
+	s.device.max_gain = max_gain;
 
-	LMS_SetNormalizedGain(device, LMS_CH_TX, channel, gain);
 	// Disable all other channels
 	LMS_EnableChannel(device, LMS_CH_TX, 1 - channel, false);
 	LMS_EnableChannel(device, LMS_CH_RX, 0, false);
@@ -466,7 +484,7 @@ int main(int argc, char *argv[])
 	if (getSampleRateRange)
 		printf("Warning: Failed to get sample rate range: %s\n", LMS_GetLastErrorMessage());
 
-	int setSampleRate = LMS_SetSampleRate(device, (double)TX_SAMPLERATE, limeOversample); 
+	int setSampleRate = LMS_SetSampleRate(device, (double)TX_SAMPLERATE, limeOversample);
 
 	if (setSampleRate)
 	{
@@ -484,9 +502,12 @@ int main(int argc, char *argv[])
 
 	// Automatic calibration
 	printf("Calibrating...\n");
-	int calibrate = LMS_Calibrate(device, LMS_CH_TX, channel, (double)TX_BANDWIDTH, 0);
+	int calibrate = LMS_Calibrate(device, LMS_CH_TX, channel, (double) TX_BANDWIDTH, 0);
+	
 	if (calibrate)
 		printf("Warning: Failed to calibrate device: %s\n", LMS_GetLastErrorMessage());
+	
+	LMS_SetGaindB(device, LMS_CH_TX, channel, gain);
 
 	// Setup TX stream
 	printf("Setup TX stream...\n");
@@ -504,6 +525,15 @@ int main(int argc, char *argv[])
 
 	// Start TX stream
 	LMS_StartStream(&s.tx.stream);
+
+	WINDOW* scr = initscr();
+	cbreak();
+	noecho();
+	wtimeout(scr, 0); //NON-BLOCKING IO. getch returns ERR if no input is read.
+	nodelay(scr, true);
+	PDC_return_key_modifiers(true);
+
+	s.meta.scr = scr;
 
 	// Start GPS task.
 	s.status = start_gps_task(&s);
@@ -534,11 +564,7 @@ int main(int argc, char *argv[])
 		printf("Creating TX task...\n");
 
 	// Running...
-#ifdef WIN32
 	printf("Running...\n" "Press 'q' to abort.\n");
-#else
-	printf("Running...\n" "Press Ctrl+C to abort.\n");
-#endif
 
 	// Wainting for TX task to complete.
 	pthread_join(s.tx.thread, NULL);
