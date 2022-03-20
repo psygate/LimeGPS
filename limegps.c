@@ -184,8 +184,8 @@ void usage(char* progname)
 
 static unsigned int scale_and_limit_gain(float gain)
 {
-	const unsigned int max_gain = 73;
-	const unsigned int min_gain = 0;
+	const unsigned int max_gain = MAX_GAIN;
+	const unsigned int min_gain = MIN_GAIN;
 
 	const value = min_gain + (max_gain - min_gain) * gain;
 	return max(min_gain, max(max_gain, value));
@@ -226,8 +226,8 @@ int main(int argc, char* argv[])
 	datetime_t t0;
 	unsigned int min_gain = 0, max_gain = 73, gain = scale_and_limit_gain(0.1);
 	s.device.gain = gain;
-	s.device.min_gain = min_gain;
-	s.device.max_gain = max_gain;
+	s.device.min_gain = MIN_GAIN;
+	s.device.max_gain = MAX_GAIN;
 
 	while ((result = getopt(argc, argv, "e:u:g:l:T:t:d:A:a:jiI")) != -1)
 	{

@@ -6,6 +6,7 @@
 #include <math.h>
 #include <time.h>
 #include <curses.h>
+#include <time.h>
 
 #include "gpssim.h"
 #include "limegps.h"
@@ -1637,6 +1638,8 @@ void* gps_task(void* arg)
 {
 	sim_t* s = (sim_t*)arg;
 
+	unsigned int lgain = 0, ogain = 0;
+
 	wclear(s->meta.scr);
 
 	int stored = 0;
@@ -2068,13 +2071,23 @@ void* gps_task(void* arg)
 
 			break;
 		case '+':
-			s->device.gain = min(s->device.gain + 1, s->device.max_gain);
-			LMS_SetGaindB(s->device.device, LMS_CH_TX, s->device.channel, s->device.gain);
-			break;
+		{
+			if (s->device.gain < s->device.max_gain)
+			{
+				s->device.gain++;
+				LMS_SetGaindB(s->device.device, LMS_CH_TX, s->device.channel, s->device.gain);
+			}
+		}
+		break;
 		case '-':
-			s->device.gain = max(s->device.gain - 1, s->device.min_gain);
-			LMS_SetGaindB(s->device.device, LMS_CH_TX, s->device.channel, s->device.gain);
-			break;
+		{
+			if (s->device.gain > s->device.min_gain)
+			{
+				s->device.gain--;
+				LMS_SetGaindB(s->device.device, LMS_CH_TX, s->device.channel, s->device.gain);
+			}
+		}
+		break;
 		}
 
 
@@ -2283,7 +2296,12 @@ void* gps_task(void* arg)
 
 		snprintf(scratchpad, SCRATCHPAD_SIZE, "Key: %d\n", key);
 		waddstr(s->meta.scr, scratchpad);
-		snprintf(scratchpad, SCRATCHPAD_SIZE, "Gain: %d\n", s->device.gain);
+		if (s->device.gain != ogain)
+		{
+			LMS_GetGaindB(s->device.device, LMS_CH_TX, s->device.channel, &lgain);
+		}
+
+		snprintf(scratchpad, SCRATCHPAD_SIZE, "Gain: R: %d D: %d\n", s->device.gain, lgain);
 		waddstr(s->meta.scr, scratchpad);
 		snprintf(scratchpad, SCRATCHPAD_SIZE, "%f,%f,%f %f, %f, %f\n", llh[0] * R2D, llh[1] * R2D, llh[2], velocity, heading, velocity_storage);
 		waddstr(s->meta.scr, scratchpad);

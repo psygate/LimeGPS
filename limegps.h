@@ -45,6 +45,8 @@
 #define DEL_TURN 4.5 // 45 deg/s
 
 #define SCRATCHPAD_SIZE 4096
+#define MIN_GAIN 0
+#define MAX_GAIN 73
 
 
 // Activate gamepad support
